@@ -72,6 +72,13 @@ final class WatchBridge: NSObject, ObservableObject {
         currentRequestID = nil
     }
 
+    func showLocalError(_ message: String) {
+        answer = nil
+        isLoading = false
+        error = message
+        status = "Ошибка"
+    }
+
     private func receive(_ message: [String: Any]) {
         guard let id = message["requestID"] as? String, id == currentRequestID,
               let text = message["text"] as? String else { return }

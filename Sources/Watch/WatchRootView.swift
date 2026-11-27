@@ -3,7 +3,6 @@ import WatchKit
 
 struct WatchRootView: View {
     @EnvironmentObject private var bridge: WatchBridge
-    @State private var showingVoice = false
 
     var body: some View {
         Group {
@@ -15,12 +14,6 @@ struct WatchRootView: View {
                 errorView(error)
             } else {
                 mainView
-            }
-        }
-        .sheet(isPresented: $showingVoice) {
-            VoiceInputView { text in
-                showingVoice = false
-                bridge.sendVoiceRequest(text)
             }
         }
     }
@@ -36,7 +29,7 @@ struct WatchRootView: View {
             }
             .tint(.blue)
             Button {
-                showingVoice = true
+                beginVoiceDictation()
             } label: {
                 Label("Спросить голосом", systemImage: "mic")
                     .frame(maxWidth: .infinity)
@@ -84,32 +77,26 @@ struct WatchRootView: View {
             }.padding(4)
         }
     }
-}
 
-struct VoiceInputView: View {
-    let onSend: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Text("Продиктуй вопрос").font(.headline)
-            TextField("Нажми и выбери микрофон", text: $text, axis: .vertical)
-                .focused($focused)
-                .lineLimit(3...6)
-                .onSubmit { submit() }
-            Button("Отправить") { submit() }
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("Отмена", role: .cancel) { dismiss() }
+    private func beginVoiceDictation() {
+        // nil suggestions asks watchOS to open dictation directly instead of
+        // showing the app's own intermediate text-entry screen.
+        guard let controller = WKApplication.shared().visibleInterfaceController else {
+            bridge.showLocalError("Не удалось открыть системную диктовку. Закрой и снова открой WristAI на часах.")
+            return
         }
-        .padding()
-        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { focused = true } }
-    }
 
-    private func submit() {
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        onSend(value)
+        controller.presentTextInputController(
+            withSuggestions: nil,
+            allowedInputMode: .plain
+        ) { results in
+            guard let text = results?.compactMap({ $0 as? String }).first?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty else { return }
+
+            Task { @MainActor in
+                bridge.sendVoiceRequest(text)
+            }
+        }
     }
 }
