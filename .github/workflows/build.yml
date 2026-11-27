@@ -1,5 +1,5 @@
 
-name: Build WristAI
+name: Build WatchAI
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     runs-on: macos-26
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,7 +17,9 @@ jobs:
       - name: Select Xcode 26
         run: |
           XCODE_PATH=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort -V | tail -n 1)
-          if [ -z "$XCODE_PATH" ]; then XCODE_PATH=/Applications/Xcode.app; fi
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH=/Applications/Xcode.app
+          fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
 
@@ -26,31 +29,38 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build unsigned device app
+      - name: Build iOS and watchOS apps
         run: |
           xcodebuild \
             -project WristAI.xcodeproj \
             -scheme WristAI \
             -configuration Release \
-            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Package IPA
+      - name: Verify embedded Watch app
         run: |
           APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/WristAI.app"
           test -d "$APP_PATH"
+          echo "Checking embedded Watch application..."
+          find "$APP_PATH" -maxdepth 4 -name '*.app' -print
+          test -d "$APP_PATH/Watch/WristAIWatch.app"
+          echo "Watch app successfully embedded!"
+
+      - name: Package IPA
+        run: |
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/WristAI.app"
           mkdir -p build/Payload
           cp -R "$APP_PATH" build/Payload/
           cd build
-          /usr/bin/zip -qry WristAI-unsigned.ipa Payload
+          /usr/bin/zip -qry WatchAI-unsigned.ipa Payload
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WristAI-unsigned-ipa
-          path: build/WristAI-unsigned.ipa
+          name: WatchAI-unsigned-ipa
+          path: build/WatchAI-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
