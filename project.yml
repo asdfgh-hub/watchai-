@@ -17,6 +17,7 @@ targets:
     platform: iOS
     sources:
       - path: Sources/iOS
+      - path: Sources/Shared
     dependencies:
       - target: WristAIWatch
         embed: true
@@ -38,6 +39,7 @@ targets:
     platform: watchOS
     sources:
       - path: Sources/Watch
+      - path: Sources/Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wristai.app.watchkitapp
