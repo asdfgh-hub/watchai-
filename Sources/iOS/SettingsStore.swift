@@ -9,7 +9,6 @@ final class AppSettings: ObservableObject {
     @Published var modelID: String { didSet { defaults.set(modelID, forKey: "modelID") } }
     @Published var prompt: String { didSet { defaults.set(prompt, forKey: "prompt") } }
     @Published var photoCount: Int { didSet { defaults.set(photoCount, forKey: "photoCount") } }
-    @Published var workspaceID: String { didSet { defaults.set(workspaceID, forKey: "workspaceID") } }
     @Published var models: [ClaudeModel] {
         didSet {
             if let data = try? JSONEncoder().encode(models) {
@@ -24,7 +23,6 @@ final class AppSettings: ObservableObject {
         modelID = defaults.string(forKey: "modelID") ?? "claude-sonnet-4-5"
         prompt = defaults.string(forKey: "prompt") ?? "Проанализируй материал внимательно. Отвечай на русском языке. Если это задание, реши его и объясни ход решения."
         photoCount = defaults.object(forKey: "photoCount") as? Int ?? 5
-        workspaceID = defaults.string(forKey: "workspaceID") ?? ""
         if let data = defaults.data(forKey: "cachedModels"),
            let cached = try? JSONDecoder().decode([ClaudeModel].self, from: data) {
             models = cached

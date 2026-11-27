@@ -6,53 +6,57 @@ struct ClaudeService: Sendable {
         var errorDescription: String? { message }
     }
 
-    private let base = URL(string: "https://api.anthropic.com")!
-    private let apiVersion = "2026-10-21"
+    // router.cheap exposes an Anthropic-compatible Messages API.
+    private let baseURL = URL(string: "https://router.cheap/v1")!
+    private let anthropicVersion = "2023-06-01"
 
-    func fetchModels(apiKey: String, workspaceID: String? = nil) async throws -> [ClaudeModel] {
-        var components = URLComponents(url: base.appendingPathComponent("v1/models"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "limit", value: "100")]
-        var request = URLRequest(url: components.url!)
+    func fetchModels(apiKey: String) async throws -> [ClaudeModel] {
+        let url = baseURL.appendingPathComponent("models")
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 30
+        // The model catalogue is OpenAI-compatible and accepts Bearer auth.
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let workspaceID = workspaceID?.trimmingCharacters(in: .whitespacesAndNewlines), !workspaceID.isEmpty {
-            request.setValue(workspaceID, forHTTPHeaderField: "anthropic-workspace-id")
-        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response, data: data)
+        try validate(response, data: data, operation: "загрузка списка моделей")
 
         struct Envelope: Decodable { let data: [ClaudeModel] }
-        let models = try JSONDecoder().decode(Envelope.self, from: data).data
+        let allModels = try JSONDecoder().decode(Envelope.self, from: data).data
+        // This app sends requests through the Anthropic Messages endpoint,
+        // so expose Claude model IDs only (other providers use other protocols).
+        let models = allModels.filter { $0.id.localizedCaseInsensitiveContains("claude") }
         guard !models.isEmpty else {
-            throw APIError(message: "Anthropic API ответил успешно, но не вернул ни одной доступной модели. Проверь доступ Workspace к моделям в Claude Console.")
+            throw APIError(message: "Ключ авторизован, но Router.cheap не вернул Claude-модели для этого аккаунта. Проверь каталог моделей и доступ ключа. Другие провайдеры требуют отдельного протокола API.")
         }
-        return models.sorted { $0.id < $1.id }
+        return models.sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
     }
 
-    func ask(text: String, imageData: Data? = nil, model: String, apiKey: String, workspaceID: String? = nil, systemPrompt: String) async throws -> String {
-        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
-            throw APIError(message: "Неверный адрес API")
-        }
+    func ask(text: String, imageData: Data? = nil, model: String, apiKey: String, systemPrompt: String) async throws -> String {
+        let url = baseURL.appendingPathComponent("messages")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 120
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        // router.cheap's Anthropic-compatible endpoint requires x-api-key.
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let workspaceID = workspaceID?.trimmingCharacters(in: .whitespacesAndNewlines), !workspaceID.isEmpty {
-            request.setValue(workspaceID, forHTTPHeaderField: "anthropic-workspace-id")
-        }
 
         var content: [[String: Any]] = []
         if let imageData {
-            content.append(["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": imageData.base64EncodedString()]])
+            content.append([
+                "type": "image",
+                "source": [
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": imageData.base64EncodedString()
+                ]
+            ])
         }
         content.append(["type": "text", "text": text])
+
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 1800,
@@ -60,8 +64,9 @@ struct ClaudeService: Sendable {
             "messages": [["role": "user", "content": content]]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response, data: data)
+        try validate(response, data: data, operation: "отправка запроса")
 
         struct Response: Decodable {
             struct Block: Decodable { let type: String; let text: String? }
@@ -69,39 +74,48 @@ struct ClaudeService: Sendable {
         }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         let answer = decoded.content.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n")
-        guard !answer.isEmpty else { throw APIError(message: "Claude вернул пустой ответ") }
+        guard !answer.isEmpty else {
+            throw APIError(message: "router.cheap вернул успешный ответ без текстового содержимого. Проверь, поддерживает ли выбранная модель формат Messages API.")
+        }
         return answer
     }
 
-    private func validate(_ response: URLResponse, data: Data) throws {
+    private func validate(_ response: URLResponse, data: Data, operation: String) throws {
         guard let http = response as? HTTPURLResponse else {
-            throw APIError(message: "Нет ответа от сервера")
+            throw APIError(message: "Не удалось получить HTTP-ответ от router.cheap.")
         }
         guard (200..<300).contains(http.statusCode) else {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            let error = object?["error"] as? [String: Any]
-            let errorType = error?["type"] as? String ?? ""
-            let rawServerMessage = error?["message"] as? String
+            let errorObject = object?["error"] as? [String: Any]
+            let errorType = errorObject?["type"] as? String ?? errorObject?["code"] as? String
+            let rawMessage = errorObject?["message"] as? String
+                ?? object?["message"] as? String
                 ?? String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 ?? "Сервер не прислал описание ошибки"
-            let serverMessage = String(rawServerMessage.prefix(600))
-            let requestID = http.value(forHTTPHeaderField: "request-id")
-                ?? http.value(forHTTPHeaderField: "anthropic-request-id")
+            let serverMessage = String(rawMessage.prefix(900))
+            let requestID = http.value(forHTTPHeaderField: "x-request-id")
+                ?? http.value(forHTTPHeaderField: "request-id")
+                ?? errorObject?["request_id"] as? String
 
-            var message: String
-            if http.statusCode == 403 && errorType == "permission_error" {
-                message = "Anthropic вернул 403 permission_error: у API-ключа нет прав на этот ресурс. Проверь в Claude Console права организации и Workspace. Если ключ не привязан к одному Workspace, укажи его ID в настройках WristAI. Также проверь, что это ключ из Claude Console, а не подписка Claude.ai."
-            } else if http.statusCode == 403 {
-                message = "Получен HTTP 403 Request not allowed. Запрос отклонён. Если ответ сервера — HTML/Cloudflare, вероятна блокировка на уровне сети или IP. Если ответ JSON — проверь права ключа, Workspace и доступность региона в Claude Console/документации Anthropic."
-            } else {
-                message = "Claude API (\(http.statusCode)): \(serverMessage)"
+            var guidance: String
+            switch http.statusCode {
+            case 401:
+                guidance = "Проверь, что это действующий API-ключ именно от router.cheap, он вставлен полностью и без пробелов."
+            case 402:
+                guidance = "Похоже, на балансе router.cheap недостаточно средств для этого запроса. Проверь баланс."
+            case 403:
+                guidance = "router.cheap отклонил запрос. Проверь, разрешена ли выбранная модель для твоего ключа, нет ли ограничений аккаунта и правильно ли выбран протокол Messages API."
+            case 404:
+                guidance = "Модель не найдена или недоступна этому ключу. Обнови список моделей и выбери ID из полученного каталога."
+            case 429:
+                guidance = "Достигнут лимит запросов или провайдера. Попробуй позже либо выбери другую доступную модель."
+            default:
+                guidance = "Проверь каталог моделей, баланс и статус router.cheap."
             }
 
-            if http.statusCode == 403 {
-                message += "\nОтвет сервера: \(serverMessage)"
-            }
-            if !errorType.isEmpty { message += "\nТип ошибки: \(errorType)" }
-            if let requestID { message += "\nRequest ID: \(requestID)" }
+            var message = "router.cheap: ошибка HTTP \(http.statusCode) при операции «\(operation)». \(guidance)\nОтвет сервера: \(serverMessage)"
+            if let errorType, !errorType.isEmpty { message += "\nТип ошибки: \(errorType)" }
+            if let requestID, !requestID.isEmpty { message += "\nRequest ID: \(requestID)" }
             throw APIError(message: message)
         }
     }

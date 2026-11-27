@@ -63,26 +63,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Claude API") {
+                Section("Router.cheap API") {
                     HStack {
                         Group {
-                            if showKey { TextField("sk-ant-…", text: $apiKey) }
-                            else { SecureField("sk-ant-…", text: $apiKey) }
+                            if showKey { TextField("API-ключ Router.cheap", text: $apiKey) }
+                            else { SecureField("API-ключ Router.cheap", text: $apiKey) }
                         }
                         Button(showKey ? "Скрыть" : "Показать") { showKey.toggle() }
                             .font(.caption)
                     }
-                    Button("Сохранить API Key") {
+                    Button("Сохранить ключ Router.cheap") {
                         settings.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
                         saved = true
                     }
                     .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     if saved { Label("Ключ сохранён в Keychain", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
-                    TextField("Workspace ID (если требуется)", text: $settings.workspaceID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("Оставь пустым, если API-ключ уже привязан к одному Workspace. Для ключа с доступом к нескольким Workspace может потребоваться ID вида wrkspc_…")
-                        .font(.footnote).foregroundStyle(.secondary)
                     Picker("Модель", selection: $settings.modelID) {
                         if settings.models.isEmpty { Text(settings.modelID).tag(settings.modelID) }
                         ForEach(settings.models) { model in Text(model.name).tag(model.id) }
@@ -152,7 +147,7 @@ struct SettingsView: View {
         settings.modelError = nil
         defer { settings.isLoadingModels = false }
         do {
-            let models = try await ClaudeService().fetchModels(apiKey: settings.apiKey, workspaceID: settings.workspaceID)
+            let models = try await ClaudeService().fetchModels(apiKey: settings.apiKey)
             settings.models = models
             if !models.contains(where: { $0.id == settings.modelID }), let first = models.first { settings.modelID = first.id }
         } catch { settings.modelError = error.localizedDescription }

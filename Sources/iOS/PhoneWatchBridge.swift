@@ -67,7 +67,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
         do {
             let settings = AppSettings.shared
             let key = settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !key.isEmpty else { throw ClaudeService.APIError(message: "Сначала добавь Claude API Key в настройках iPhone") }
+            guard !key.isEmpty else { throw ClaudeService.APIError(message: "Сначала добавь API-ключ Router.cheap в настройках iPhone") }
             status = "Обрабатывается запрос с часов"
             lastError = nil
             let answer: String
@@ -75,7 +75,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
             if request.kind == "voice" {
                 let question = request.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 guard !question.isEmpty else { throw ClaudeService.APIError(message: "Пустой голосовой запрос") }
-                answer = try await service.ask(text: question, model: settings.modelID, apiKey: key, workspaceID: settings.workspaceID, systemPrompt: settings.prompt)
+                answer = try await service.ask(text: question, model: settings.modelID, apiKey: key, systemPrompt: settings.prompt)
                 title = String(question.prefix(70))
                 HistoryStore.shared.add(ChatRecord(title: title, kind: "Голос", messages: [
                     ChatMessage(role: .user, text: question), ChatMessage(role: .assistant, text: answer)
@@ -85,13 +85,12 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
                 let claudeService = service
                 let selectedModel = settings.modelID
                 let sharedPrompt = settings.prompt
-                let workspaceID = settings.workspaceID
                 var results = Array(repeating: "", count: images.count)
                 try await withThrowingTaskGroup(of: (Int, String).self) { group in
                     var next = 0
                     func add(_ index: Int) {
                         group.addTask {
-                            let response = try await claudeService.ask(text: "Проанализируй эту фотографию отдельно. Это изображение \(index + 1) из \(images.count).", imageData: images[index], model: selectedModel, apiKey: key, workspaceID: workspaceID, systemPrompt: sharedPrompt)
+                            let response = try await claudeService.ask(text: "Проанализируй эту фотографию отдельно. Это изображение \(index + 1) из \(images.count).", imageData: images[index], model: selectedModel, apiKey: key, systemPrompt: sharedPrompt)
                             return (index, response)
                         }
                     }
